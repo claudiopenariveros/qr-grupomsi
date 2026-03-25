@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Generador QR — Grupo MSI</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c28;--border:#2a2a3d;--accent:#F6931E;--accent2:#06b6d4;--text:#e8e8f0;--muted:#6b6b8a;--ok:#10b981}
@@ -108,10 +107,11 @@ input.nom::placeholder{color:var(--muted)}
 <div class="toast" id="toast"></div>
 
 <script>
-const SUPABASE_URL = 'https://vvzyrugtmyrnnhhqxwoo.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_LP4N8V3hpdwNkKdtiHXU5A_saj4FDf1';
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const BASE = 'https://vvzyrugtmyrnnhhqxwoo.supabase.co/rest/v1';
+const KEY = 'sb_publishable_LP4N8V3hpdwNkKdtiHXU5A_saj4FDf1';
+const HEADERS = { 'apikey': KEY, 'Authorization': 'Bearer ' + KEY };
 let busy = false;
+let lastSig = '';
 
 function status(state, msg) {
   document.getElementById('sdot').className = 'sdot ' + state;
@@ -124,7 +124,7 @@ async function init() {
     const items = await read();
     status('ok', 'Conectado — lista compartida activa');
     render(items);
-    subscribe();
+    startPoll();
   } catch(e) {
     status('', 'Error: ' + e.message);
     toast('Error: ' + e.message, 'err');
@@ -132,20 +132,19 @@ async function init() {
 }
 
 async function read() {
-  const { data, error } = await sb
-    .from('qrcodes')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return data || [];
+  const r = await fetch(BASE + '/qrcodes?select=*&order=created_at.desc', { headers: HEADERS });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
+  return r.json();
 }
 
-function subscribe() {
-  sb.channel('qrcodes-realtime')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'qrcodes' }, () => {
-      read().then(render).catch(() => {});
-    })
-    .subscribe();
+function startPoll() {
+  setInterval(async () => {
+    try {
+      const items = await read();
+      const sig = JSON.stringify(items);
+      if (sig !== lastSig) { lastSig = sig; render(items); }
+    } catch(_) {}
+  }, 5000);
 }
 
 async function addQR() {
@@ -171,10 +170,12 @@ async function addQR() {
 
   try {
     const id = Date.now();
-    const { error } = await sb
-      .from('qrcodes')
-      .insert([{ id, url, name, date }]);
-    if (error) throw error;
+    const r = await fetch(BASE + '/qrcodes', {
+      method: 'POST',
+      headers: { ...HEADERS, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify({ id, url, name, date })
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
     const items = await read();
     render(items);
     toast('QR creado y compartido', 'ok');
@@ -196,8 +197,10 @@ function showErr(errEl, urlEl) {
 
 async function removeQR(id) {
   try {
-    const { error } = await sb.from('qrcodes').delete().eq('id', id);
-    if (error) throw error;
+    const r = await fetch(BASE + '/qrcodes?id=eq.' + id, {
+      method: 'DELETE', headers: HEADERS
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
     const items = await read();
     render(items);
   } catch(e) { toast('Error: ' + e.message, 'err'); }
@@ -206,13 +209,16 @@ async function removeQR(id) {
 async function deleteAll() {
   if (!confirm('Eliminar todos los QRs para todos los usuarios?')) return;
   try {
-    const { error } = await sb.from('qrcodes').delete().neq('id', 0);
-    if (error) throw error;
+    const r = await fetch(BASE + '/qrcodes?id=gt.0', {
+      method: 'DELETE', headers: HEADERS
+    });
+    if (!r.ok) { const e = await r.json(); throw new Error(e.message || r.status); }
     render([]);
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
 function render(items) {
+  lastSig = JSON.stringify(items);
   const list = document.getElementById('list');
   const empty = document.getElementById('empty');
   const stats = document.getElementById('stats');
