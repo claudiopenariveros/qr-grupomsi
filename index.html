@@ -144,7 +144,7 @@ function startPoll() {
       const sig = JSON.stringify(items);
       if (sig !== lastSig) { lastSig = sig; render(items); }
     } catch(_) {}
-  }, 5000);
+  }, 1500);
 }
 
 async function addQR() {
