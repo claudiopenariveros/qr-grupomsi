@@ -170,9 +170,10 @@ async function addQR() {
   urlEl.value = ''; nomEl.value = ''; errEl.style.display = 'none';
 
   try {
+    const id = Date.now();
     const { error } = await sb
       .from('qrcodes')
-      .insert([{ url, name, date }]);
+      .insert([{ id, url, name, date }]);
     if (error) throw error;
     const items = await read();
     render(items);
